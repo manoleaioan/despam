@@ -1,0 +1,48 @@
+# Node.js
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Electron build artifacts
+dist/
+build/
+*.asar
+*.dmg
+*.exe
+*.deb
+*.rpm
+*.pkg
+*.tar.gz
+*.app
+
+# macOS specific
+.DS_Store
+
+# Windows specific
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux specific
+*.bak
+
+# Editor directories and files
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Logs
+*.log
+
+# Environment variables
+.env
+token.json
+credentials.json
+
+# Dependency directories
+bower_components/
+
+# Optional npm cache directory
+.npm/

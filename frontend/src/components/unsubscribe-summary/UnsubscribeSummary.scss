@@ -1,0 +1,22 @@
+.summary {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    font-weight: 600;
+    font-size: 45px;
+    text-align: center;
+    height: 90vh;
+
+    .logo {
+        width: 91px;
+        height: 97px;
+        margin-top: 64px;
+        margin-bottom: 35px;
+        filter: drop-shadow(0px 4px 0px var(--accent));
+    }
+
+    .btn{
+        margin-top: 30px;
+    }
+}

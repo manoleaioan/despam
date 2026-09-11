@@ -1,0 +1,94 @@
+.keywords-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100vh;
+    backdrop-filter: blur(10px);
+    background: rgba(13, 13, 13, 0.03);
+
+    .header {
+        width: 100%;
+        // height: 80px !important;
+        margin-top: 20px;
+        position: sticky;
+        top: 0;
+        // backdrop-filter: blur(10px);
+        background: #0d0d0d8a;
+
+        .inner {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 0 40px;
+            height: 90px;
+
+            .btn {
+                margin-left: 10px;
+            }
+
+            .btn.outline {
+                background-color: transparent;
+
+                .MuiButton-icon {
+                    margin: 0 !important;
+                }
+            }
+        }
+    }
+
+    .keyword-settings {
+        display: flex;
+        justify-content: center;
+        flex-direction: column;
+        width: 100%;
+        max-width: 1080px;
+
+        .keyword-group {
+            margin-top: 30px;
+            
+        }
+
+        .keyword-title {
+            font-weight: 400;
+            font-size: 24px;
+            color: var(--primary);
+            margin-left: 20px;
+            margin-right: 20px;
+        }
+
+        .keyword-description {
+            font-weight: 400;
+            font-size: 15px;
+            line-height: 140%;
+            color: var(--secondary);
+            margin-top: 5px;
+            margin-left: 20px;
+            margin-right: 20px;
+            width: 100%;
+        }
+
+        .keyword-input {
+            width: 100%;
+            min-width: 100%;
+            max-width: 100%;
+            resize: vertical;
+            border-radius: 20px;
+            background-color: #1e1e1e;
+            padding: 20px;
+            box-sizing: border-box;
+            border: none;
+            margin-top: 21px;
+            min-height: 238px;
+            white-space: pre-wrap;
+
+            &:focus {
+                outline: none;
+                box-shadow: none;
+                border-color: transparent;
+                /* Optional: remove border highlight */
+            }
+        }
+    }
+}

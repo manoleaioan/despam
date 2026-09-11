@@ -1,9 +1,13 @@
 const fs = require('fs');
 const path = require('path');
+const url = require('url');
 const { google } = require('googleapis');
 const { shell, app } = require('electron');
 const express = require('express');
-const url = require('url');
+
+const appServer = express();
+let port = 3020;
+const maxRetries = 20;
 
 const CREDENTIALS_PATH = !app.isPackaged
   ? path.join(__dirname, 'credentials.json')
@@ -16,9 +20,8 @@ const TOKEN_PATH = !app.isPackaged
 // Singleton OAuth2 client
 let oAuth2ClientInstance = null;
 
-// Express server setup
-const appServer = express();
-const port = 3020;
+let tokenPromise = null;
+
 
 const unsubscribeKeywords = [
   // English
@@ -31,10 +34,10 @@ const unsubscribeKeywords = [
   'désabonner', 'se désabonner', 'annuler l’abonnement', 'désinscrire', 'gérer les abonnements',
 
   // German
-  'abmelden', 'abonnement kündigen', 'austragen', 'abonnements verwalten','newsletter abmelden',
+  'abmelden', 'abonnement kündigen', 'austragen', 'abonnements verwalten', 'newsletter abmelden',
 
   // Portuguese
-  'cancelar','cancelar inscrição', 'optar por não receber', 'gerenciar assinaturas', 'descadastrar',
+  'cancelar', 'cancelar inscrição', 'optar por não receber', 'gerenciar assinaturas', 'descadastrar',
 
   // Italian
   'annullare l\'iscrizione', 'cancellarsi', 'gestire le iscrizioni', 'annullare l\'abbonamento',
@@ -66,37 +69,64 @@ const getOAuthClient = () => {
 
   const content = fs.readFileSync(CREDENTIALS_PATH);
   const credentials = JSON.parse(content);
-  const { client_id, client_secret, redirect_uris } = credentials.web;
-  oAuth2ClientInstance = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
+  const { client_id, client_secret } = credentials.web;
+  oAuth2ClientInstance = new google.auth.OAuth2(client_id, client_secret, `http://localhost:${port}`);
 
   return oAuth2ClientInstance;
 };
 
 // Function to handle token loading and refreshing
-const getOAuth2ClientWithToken = async () => {
+const getOAuth2ClientWithToken = async (autoTrigger) => {
   const client = getOAuthClient();
 
-  try {
-    const token = JSON.parse(fs.readFileSync(TOKEN_PATH));
-    client.setCredentials(token);
+  // if (tokenPromise) {
+  //   await tokenPromise;
+  //   return client;
+  // }
 
-    // Check if token is expired and refresh it if needed
-    const isExpired = token.expiry_date && token.expiry_date < Date.now();
-    if (isExpired) {
-      console.log('Token expired, refreshing...');
-      // Refresh token automatically
-      const refreshedToken = await client.refreshAccessToken();
-      client.setCredentials(refreshedToken.credentials);
-      saveToken(refreshedToken.credentials);
+  // Define the closure function with `autoTrigger` passed in
+  const runWithToken = async (trigger) => {
+    try {
+      const token = JSON.parse(fs.readFileSync(TOKEN_PATH));
+      client.setCredentials(token);
+
+      const isExpired = token.expiry_date && token.expiry_date < Date.now();
+      if (isExpired) {
+        console.log('Token expired, refreshing...');
+        const refreshedToken = await client.refreshAccessToken();
+        client.setCredentials(refreshedToken.credentials);
+        saveToken(refreshedToken.credentials);
+      }
+    } catch (err) {
+      console.log('No valid token found or token expired.');
+      console.log('trigger is:', trigger); // ✅ this will now always be correct
+      if (trigger) {
+        await getNewToken(client);
+      } else {
+        throw new Error('Not authenticated');
+      }
+    } finally {
+      tokenPromise = null;
     }
+  };
 
-    // console.log('Token loaded and set.');
-  } catch (err) {
-    console.log('No valid token found or token expired, need to authenticate.');
-    await getNewToken(client);  // Prompt the user to authenticate
-  }
+  // Call it with `autoTrigger` and save the promise
+  tokenPromise = runWithToken(autoTrigger);
 
+  await tokenPromise;
   return client;
+};
+
+
+
+const checkToken = async () => {
+  try {
+    await getOAuth2ClientWithToken();
+    return { valid: true };
+  } catch (err) {
+    console.log('User not authenticated:', err.message);
+    return { valid: false };
+  }
 };
 
 // Function to request a new token and handle OAuth callback
@@ -104,13 +134,18 @@ const getNewToken = (oAuth2Client) => {
   return new Promise((resolve, reject) => {
     const authUrl = oAuth2Client.generateAuthUrl({
       access_type: 'offline',
-      scope: ['https://www.googleapis.com/auth/gmail.modify'],
+      scope: [
+        'https://www.googleapis.com/auth/gmail.modify',
+        'https://www.googleapis.com/auth/userinfo.profile',
+        'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/gmail.settings.basic',
+        'https://mail.google.com/'
+      ],
       prompt: 'consent', // Ensure refresh_token is received
     });
 
     shell.openExternal(authUrl);
 
-    // Define the OAuth callback handler
     const handleOAuthCallback = async (req, res) => {
       const queryParams = url.parse(req.url, true).query;
       const code = queryParams.code;
@@ -120,7 +155,6 @@ const getNewToken = (oAuth2Client) => {
           const { tokens } = await oAuth2Client.getToken(code);
           oAuth2Client.setCredentials(tokens);
           saveToken(tokens);
-
           res.send('<h1>Authentication successful! You can close this page now.</h1>');
           resolve();
         } catch (err) {
@@ -138,19 +172,43 @@ const getNewToken = (oAuth2Client) => {
       );
     };
 
-    // Assign the OAuth callback route
     appServer.get('/', handleOAuthCallback);
-
-    // Start the server only if not already listening
-    if (!appServer.listening) {
-      appServer.listen(port, () => {
-        console.log(`Server listening at http://localhost:${port}`);
-      });
-    }
   });
 };
 
-async function getSpamEmails(pageToken = null) {
+
+async function logout() {
+  try {
+    // Revoke the token using Google's OAuth2 API
+    const oAuth2Client = getOAuthClient(); // Ensure we have the client initialized
+    if (fs.existsSync(TOKEN_PATH)) {
+      const token = JSON.parse(fs.readFileSync(TOKEN_PATH));
+
+      if (token.access_token) {
+        await oAuth2Client.revokeToken(token.access_token); // Revoke the token on Google's server
+        console.log('Token revoked successfully.');
+      }
+
+      // Delete the token file
+      await fs.promises.unlink(TOKEN_PATH);
+
+      console.log(`Token file deleted at ${TOKEN_PATH}. User logged out.`);
+    } else {
+      console.log(`No token file found at ${TOKEN_PATH}.`);
+    }
+
+    // Clear the OAuth2 client instance
+    oAuth2ClientInstance = null;
+    tokenPromise = null;
+
+    return { success: true, message: 'Logout successful' };
+  } catch (error) {
+    console.error('Error during logout:', error);
+    return { success: false, message: 'Logout failed', error };
+  }
+}
+
+async function getSpamEmails(pageToken = null, maxResults = 50) {
   try {
     const oAuth2Client = await getOAuth2ClientWithToken();
     const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });
@@ -159,7 +217,7 @@ async function getSpamEmails(pageToken = null) {
     const response = await gmail.users.messages.list({
       userId: 'me',
       labelIds: ['SPAM'],
-      maxResults: 50,
+      maxResults,
       pageToken: pageToken || undefined,
     });
 
@@ -189,6 +247,34 @@ async function getSpamEmails(pageToken = null) {
   }
 }
 
+async function getTotalSpamEmailCount() {
+  try {
+    const oAuth2Client = await getOAuth2ClientWithToken();
+    const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });
+
+    const response = await gmail.users.labels.get({
+      userId: 'me',
+      id: 'SPAM',
+    });
+
+    const totalSpamEmails = response.data.messagesTotal;
+
+    return totalSpamEmails;
+  } catch (error) {
+    console.error('Error fetching total spam email count:', error);
+
+    if (error.response && error.response.data && error.response.data.error === 'invalid_grant') {
+      console.log('Refresh token is invalid or expired.');
+      if (fs.existsSync(TOKEN_PATH)) {
+        fs.unlinkSync(TOKEN_PATH);
+        console.log('Deleted invalid token file.');
+      }
+    }
+
+    throw error;
+  }
+}
+
 async function getEmailDetails(messageId) {
   try {
     const oAuth2Client = await getOAuth2ClientWithToken();
@@ -204,15 +290,19 @@ async function getEmailDetails(messageId) {
     const headers = message.data.payload.headers;
 
     const getHeaderValue = (name) => {
-      const header = headers.find((header) => header.name === name);
+      const header = headers.find((header) => header.name.toLowerCase() === name.toLowerCase());
       return header ? header.value : null;
     };
 
-    const fromHeader = getHeaderValue('From');
-    const fromEmail = fromHeader ? fromHeader.match(/<([^>]+)>/)?.[1] : 'Unknown';
+    let fromHeader = getHeaderValue('From');
+    if (!fromHeader) {
+      fromHeader = getHeaderValue('Sender') || getHeaderValue('Reply-To');
+    }
+
+    const fromEmail = fromHeader ? (fromHeader.match(/[^< ]+(?=>)/g)?.[0] || fromHeader.match(/[^< >]+/g)?.[0]) : 'Unknown';
 
     let unsubscribeLink = (getHeaderValue('List-Unsubscribe')?.match(/<(https?:\/\/[^\s,]+)(?=\s|,|>)/)?.[1] || 'N/A');
-    
+
     if (unsubscribeLink.startsWith('mailto:') || unsubscribeLink == 'N/A') {
       const bodyMessage = await gmail.users.messages.get({
         userId: 'me',
@@ -225,7 +315,7 @@ async function getEmailDetails(messageId) {
       let bodyText = '';
 
       // Handle both cases: multiple parts or single body
-      if (payload.parts) {   
+      if (payload.parts) {
         payload.parts.forEach(part => {
           if (part.mimeType === 'text/plain' || part.mimeType === 'text/html') {
             bodyText += part.body.data || ''; // Append content if available
@@ -288,5 +378,69 @@ async function getEmailDetails(messageId) {
   }
 }
 
+async function deleteEmails(ids) {
+  // throw new Error('Simulated error: Failed to delete emails');
 
-module.exports = { getSpamEmails, getEmailDetails };
+  try {
+    const oAuth2Client = await getOAuth2ClientWithToken();
+
+    const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });
+
+    await gmail.users.messages.batchDelete({
+      userId: 'me',
+      ids,
+    });
+
+    console.log(`Emails with IDs [${ids.join(', ')}] have been deleted.`);
+    return { success: true, message: `Emails with IDs [${ids.join(', ')}] deleted.` };
+  } catch (error) {
+    console.error('Error deleting email:', error);
+    throw error;
+  }
+}
+
+async function getUserProfile() {
+  try {
+    // Get the OAuth2 client with the access token
+    const oAuth2Client = await getOAuth2ClientWithToken();
+
+    // Create the Google OAuth2 API client
+    const oauth2 = google.oauth2({
+      version: 'v2',
+      auth: oAuth2Client,  // Pass the OAuth2 client with the access token
+    });
+
+    // Fetch user info
+    const userInfo = await oauth2.userinfo.get();
+
+    // You can access the user's profile data here
+    const { email, name, picture } = userInfo.data;
+
+    return {
+      email, 
+      name,
+      picture,
+    };
+  } catch (error) {
+    console.error('Error fetching user profile:', error);
+    throw error;
+  }
+}
+
+const startServer = (retries) => {
+  appServer.listen(port, () => {
+    console.log(`Server listening at http://localhost:${port}`);
+  }).on('error', (err) => {
+    if (err.code === 'EADDRINUSE' && retries < maxRetries) {
+      console.log(`Port ${port} is in use, trying port ${port + 1}...`);
+      port++;
+      startServer(retries + 1);
+    } else {
+      console.error('Error starting server:', err);
+    }
+  });
+};
+
+startServer(0);
+
+module.exports = { getSpamEmails, getEmailDetails, getTotalSpamEmailCount, getUserProfile, deleteEmails, logout, checkToken, getOAuth2ClientWithToken };

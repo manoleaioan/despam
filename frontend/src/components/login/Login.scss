@@ -1,0 +1,81 @@
+.login-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+
+
+    .card {
+        width: 530px;
+        height: 460px;
+        margin: 0 auto;
+        border-radius: 30px;
+        overflow: hidden;
+        background: linear-gradient(360deg, #0F0F0F 31.67%, #242a20 100%);
+        background: linear-gradient(360deg, rgba(17, 17, 17, 0.4) 31.67%, #242a20 100%);
+        padding: 20px;
+        box-sizing: border-box;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        position: relative;
+        z-index: 10;
+
+        svg.bgelem {
+            position: absolute;
+            z-index: -1;
+            margin-left: auto;
+            margin-right: auto;
+            left: 0;
+            right: 0;
+        }
+
+
+        .top {
+            display: flex;
+            flex-direction: column;
+            // justify-content: center;
+            align-items: center;
+
+            .logo {
+                width: 91px;
+                height: 97px;
+                margin-top: 64px;
+            }
+
+            h1 {
+                font-weight: 800;
+                font-size: 48px;
+                text-align: center;
+            }
+
+            span {
+                color: var(--secondary);
+                font-weight: 400;
+                font-size: 16px;
+                margin-top: 8px;
+            }
+        }
+
+        hr {
+            background-color: rgba(77, 77, 77, 0.24);
+            border: none;
+            margin: 0 auto;
+            width: 350px;
+            height: 1px;
+            margin-top: 29px;
+        }
+
+        .google-btn {
+            border-radius: 20px;
+            width: 290px;
+            height: 68px;
+            margin: 0 auto;
+            margin-top: 32px;
+
+            svg {
+                margin-right: 10px;
+            }
+        }
+    }
+}

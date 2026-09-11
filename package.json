@@ -1,5 +1,5 @@
 {
-  "name": "despam",
+  "name": "Despam",
   "version": "1.0.0",
   "main": "main.js",
   "scripts": {
@@ -17,7 +17,9 @@
       "assets",
       "gmailAPI.js",
       "credentials.json",
-      "preload.js"
+      "preload.js",
+      "webviewPreload.js",
+      "keywords.js"
     ],
     "directories": {
       "output": "dist"
@@ -29,6 +31,10 @@
       {
         "from": "credentials.json",
         "to": "credentials.json"
+      },
+      {
+        "from": "keywords.js",
+        "to": "keywords.js"
       }
     ]
   },
@@ -41,10 +47,11 @@
     "electron-builder": "^25.1.8"
   },
   "dependencies": {
-    "axios": "^1.7.7",
+    "axios": "^1.7.8",
     "concurrently": "^9.1.0",
     "express": "^4.21.1",
     "googleapis": "^144.0.0",
+    "json5": "^2.2.3",
     "wait-on": "^8.0.1"
   }
 }

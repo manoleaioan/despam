@@ -27,7 +27,7 @@ import useConfig from '../../hooks/useConfig';
 function MainApp() {
   const navigate = useNavigate();
 
-  const useTestData = false;
+  const useTestData = true;
   const [maxResults, setMaxResults] = useState(50);
   const testEmails = testEmailsJson?.slice(0, maxResults);
   const [emails, setEmails] = useState([]);
@@ -96,7 +96,34 @@ function MainApp() {
   const [unsubSuccessCount, setUnsubSuccessCount] = useState(0);
   const [preloadPath, setPreloadPath] = useState('');
   const [ready, setReady] = useState(false);
+  const agentJobIdRef = useRef(null);
+  const agentNavigationIdRef = useRef(null);
+  const agentTimeoutRef = useRef(null);
+  const [ollamaStatus, setOllamaStatus] = useState({ checking: true, ready: false });
 
+  const refreshOllamaStatus = async () => {
+    setOllamaStatus({ checking: true, ready: false });
+    setOllamaStatus(await window.electronAPI.getOllamaStatus());
+  };
+
+  const handleOllamaStatusClick = () => {
+    if (ollamaStatus.ready || ollamaStatus.checking) {
+      refreshOllamaStatus();
+      return;
+    }
+    const instruction = ollamaStatus.reason === 'model_missing'
+      ? 'Ollama is running, but the required model is missing. Run:\n\nollama pull qwen3.5:27b'
+      : 'Ollama is not running. Open a terminal and run:\n\nollama serve';
+    window.alert(instruction);
+    refreshOllamaStatus();
+  };
+
+  useEffect(() => {
+    refreshOllamaStatus();
+    const statusInterval = setInterval(refreshOllamaStatus, 5000);
+
+    return () => clearInterval(statusInterval);
+  }, []);
 
   useEffect(() => {
     if (testEmails && useTestData) {
@@ -163,6 +190,76 @@ function MainApp() {
 
     return () => {
       webview.removeEventListener('ipc-message', ipcMessageHandler);
+    };
+  }, []);
+
+  useEffect(() => {
+    const webview = webviewRef.current;
+
+    if (!webview) return;
+
+    const finishInRenderer = async (terminalAction) => {
+      const { jobId, navigationId } = terminalAction;
+      if (jobId !== agentJobIdRef.current || navigationId !== agentNavigationIdRef.current) return;
+      if (agentTimeoutRef.current) clearTimeout(agentTimeoutRef.current);
+      agentTimeoutRef.current = null;
+      webviewRef.current?.send('cancel-agent-activity', { jobId, navigationId });
+      agentJobIdRef.current = null;
+      agentNavigationIdRef.current = null;
+      await onUnsubscribed({ success: terminalAction.status === 'success', url: '' });
+    };
+
+    const dispatchAction = (action) => {
+      if (action?.jobId !== agentJobIdRef.current || action?.navigationId !== agentNavigationIdRef.current) return;
+      webviewRef.current?.send('execute-agent-action', action);
+    };
+
+    const processSnapshot = async (snapshot) => {
+      if (snapshot.jobId !== agentJobIdRef.current || snapshot.navigationId !== agentNavigationIdRef.current) return;
+
+      console.log(
+        'DOM SNAPSHOT RECEIVED:',
+        snapshot
+      );
+
+      const action =
+        await window.electronAPI.runAgentStep(
+          snapshot,
+          snapshot.jobId,
+          snapshot.navigationId
+        );
+
+      if (action) dispatchAction(action);
+    };
+
+    const handleIPCMessage = async (event) => {
+      if (event.channel === 'dom-snapshot') {
+        await processSnapshot(event.args[0]);
+        return;
+      }
+      if (event.channel === 'agent-action-result') {
+        const completion = await window.electronAPI.completeAgentAction(event.args[0]);
+        if (!completion) return;
+        if (completion.nextSnapshot) {
+          await processSnapshot(completion.nextSnapshot);
+        } else if (completion.action === 'done') {
+          await finishInRenderer(completion);
+        }
+      }
+    };
+
+    webview.addEventListener('ipc-message', handleIPCMessage);
+
+    const handleAgentDocumentReady = () => {
+      if (agentJobIdRef.current && agentNavigationIdRef.current) {
+        webview.send('set-agent-context', { jobId: agentJobIdRef.current, navigationId: agentNavigationIdRef.current });
+      }
+    };
+    webview.addEventListener('did-finish-load', handleAgentDocumentReady);
+
+    return () => {
+      webview.removeEventListener('ipc-message', handleIPCMessage);
+      webview.removeEventListener('did-finish-load', handleAgentDocumentReady);
     };
   }, []);
 
@@ -388,29 +485,74 @@ function MainApp() {
     }
   };
 
+
   const loadMail = async () => {
-    // find and load the next unsubscribe url
     for (let i = emailIndexRef.current; i < emailsRef.current.length; i++) {
       const unsubscribeLink = emailsRef.current[i]?.unsubscribeLink;
 
       emailIndexRef.current++;
       setEmailIndex(emailIndexRef.current);
-
       totalEmailIndexRef.current++;
       setTotalEmailIndex(totalEmailIndexRef.current);
 
       if (unsubscribeLink && unsubscribeLink !== 'N/A') {
-        webviewRef.current.src = unsubscribeLink;
-        console.log('\nLoad mail index : ', i, unsubscribeLink);
-        return;
+        try {
+          const url = new URL(unsubscribeLink);
+
+          if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+            console.warn('Invalid unsubscribe protocol:', unsubscribeLink);
+            continue;
+          }
+
+          const navigationId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          const { jobId } = await window.electronAPI.resetAgentState(navigationId);
+
+          agentJobIdRef.current = jobId;
+          agentNavigationIdRef.current = navigationId;
+
+          if (agentTimeoutRef.current) {
+            clearTimeout(agentTimeoutRef.current);
+          }
+
+          agentTimeoutRef.current = setTimeout(
+            async () => {
+              const timeoutAction = await window.electronAPI.timeoutAgent(jobId, navigationId);
+
+              if (!timeoutAction) {
+                return;
+              }
+
+              console.log(
+                'AGENT TIMEOUT:',
+                timeoutAction
+              );
+
+              if (jobId === agentJobIdRef.current && navigationId === agentNavigationIdRef.current) {
+                webviewRef.current?.send('execute-agent-action', timeoutAction);
+              }
+            },
+            60000
+          );
+
+          webviewRef.current.src = url.href;
+          console.log('\nLoad mail index:', i, url.href);
+
+          return;
+        } catch (error) {
+          console.warn(
+            'Invalid unsubscribe URL:',
+            unsubscribeLink,
+            error
+          );
+
+          continue;
+        }
       }
     }
 
-
-    // if not found, and reached the end of the page
     await handleAutoDeleteEmails();
     goNextPage();
-  }
+  };
 
   const goNextPage = () => {
     console.log(' GO NEXT', nextPageTokenRef.current)
@@ -424,6 +566,10 @@ function MainApp() {
   }
 
   const startUnsubscribe = () => {
+    if (!ollamaStatus.ready) {
+      refreshOllamaStatus();
+      return;
+    }
     if (startBotRef.current) {
       handleStop();
     } else {
@@ -571,7 +717,9 @@ function MainApp() {
       }
 
       {
-        !startBot && <span className='keywords' onClick={() => navigate('/keywords', { replace: true })}>keywords settings</span>
+        !startBot && <button className={classNames('ollama-status', { ready: ollamaStatus.ready, unavailable: !ollamaStatus.ready })} onClick={handleOllamaStatusClick} title={ollamaStatus.ready ? 'Ollama is working' : ollamaStatus.reason === 'model_missing' ? 'Run: ollama pull qwen3.5:27b' : 'Start Ollama with: ollama serve'}>
+          {ollamaStatus.checking ? 'Checking Ollama…' : ollamaStatus.ready ? 'Ollama is working' : ollamaStatus.reason === 'model_missing' ? 'Ollama model missing — click for help' : 'Ollama is not running — click for help'}
+        </button>
       }
 
       {

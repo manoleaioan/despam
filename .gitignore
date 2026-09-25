@@ -46,3 +46,6 @@ bower_components/
 
 # Optional npm cache directory
 .npm/
+
+# Test Data
+frontend/src/testEmails.json

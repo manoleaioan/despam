@@ -18,8 +18,7 @@
       "gmailAPI.js",
       "credentials.json",
       "preload.js",
-      "webviewPreload.js",
-      "keywords.js"
+      "webviewPreload.js"
     ],
     "directories": {
       "output": "dist"
@@ -31,11 +30,7 @@
       {
         "from": "credentials.json",
         "to": "credentials.json"
-      },
-      {
-        "from": "keywords.js",
-        "to": "keywords.js"
-      }
+    }
     ]
   },
   "keywords": [],

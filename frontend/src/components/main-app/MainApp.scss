@@ -126,7 +126,9 @@
         }
     }
 
-    span.keywords {
+    .ollama-status {
+        background: transparent;
+        border: 0;
         color: var(--secondary);
         margin-top: 8px;
         cursor: pointer;
@@ -135,6 +137,16 @@
 
         &:hover {
             text-decoration: underline;
+        }
+
+        &.ready {
+            color: #5ad66f;
+            opacity: 1;
+        }
+
+        &.unavailable {
+            color: #ff6b6b;
+            opacity: 1;
         }
     }
 

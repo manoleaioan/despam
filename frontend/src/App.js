@@ -3,13 +3,11 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { green } from '@mui/material/colors';
 import Login from './components/login/Login';
 
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route } from 'react-router-dom';
 import MainApp from './components/main-app/MainApp';
-import { AuthProvider, useAuth } from './context/AuthContext';
+import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute } from './components/common/ProtectedRoute';
-import LoadingScreen from './components/loading-screen/LoadingScreen';
 import UnsubscribeSummary from './components/unsubscribe-summary/UnsubscribeSummary';
-import Keywords from './components/Keywords/Keywords';
 
 const darkTheme = createTheme({
   cssVariables: true,
@@ -48,12 +46,6 @@ const Router = () => (
     />
 
 
-    <Route
-      path="/keywords"
-      element={
-        <ProtectedRoute authenticated component={Keywords} />
-      }
-    />
 
     <Route path="*"
       element={
